@@ -1,0 +1,34 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+env:
+  APP_NAME: pipeline-dashboard
+  APP_PORT: "3001"
+  REGISTRY_URL: crpi-2hhvyuuzflfxsyey.cn-beijing.personal.cr.aliyuncs.com
+  REGISTRY_NAMESPACE: chmjk67
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
+            ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
+      - uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            /opt/app/scripts/deploy.sh --app-name ${{ env.APP_NAME }} --image ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }} --port ${{ env.APP_PORT }} --internal-port 80
