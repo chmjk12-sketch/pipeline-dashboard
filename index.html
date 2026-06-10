@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline Dashboard</title>
+<style>
+/* ========== 基础重置与深色主题 ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-primary: #0d1117;
+  --bg-card: #161b22;
+  --bg-card-hover: #1c2333;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --blue: #58a6ff;
+  --gray: #484f58;
+  --status-pass: var(--green);
+  --status-fail: var(--red);
+  --status-running: var(--yellow);
+  --status-unknown: var(--gray);
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: 20px;
+}
+/* ========== 头部 ========== */
+.header {
+  max-width: 1400px; margin: 0 auto 24px;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+}
+.header h1 { font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.header h1 .logo { font-size: 28px; }
+.stats-bar { display: flex; gap: 16px; font-size: 14px; flex-wrap: wrap; }
+.stat-item { display: flex; align-items: center; gap: 4px; }
+.stat-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.stat-dot.pass { background: var(--status-pass); }
+.stat-dot.fail { background: var(--status-fail); }
+.stat-dot.running { background: var(--status-running); }
+.stat-dot.unknown { background: var(--status-unknown); }
+.controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.controls button {
+  background: #21262d; color: var(--text-primary); border: 1px solid var(--border);
+  padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: 0.2s;
+}
+.controls button:hover { background: #30363d; }
+.controls .refresh-time { font-size: 12px; color: var(--text-secondary); }
+.auto-refresh-label { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+/* ========== 错误 Banner ========== */
+.banner-error {
+  max-width: 1400px; margin: 0 auto 16px;
+  background: rgba(248,81,73,0.1); border: 1px solid var(--red); border-radius: 8px;
+  padding: 10px 16px; font-size: 14px; color: var(--red); display: none;
+}
+.banner-error.show { display: block; }
+/* ========== 项目卡片 ========== */
+.grid {
+  max-width: 1400px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px;
+}
+.card {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 20px; transition: border-color 0.3s, box-shadow 0.3s;
+}
+.card:hover { border-color: var(--text-muted); }
+.card-title {
+  font-size: 16px; font-weight: 600; margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.card-title .repo-link { color: var(--blue); text-decoration: none; }
+.card-title .repo-link:hover { text-decoration: underline; }
+/* ========== 状态行 ========== */
+.status-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0; font-size: 13px; border-bottom: 1px solid rgba(48,54,61,0.4);
+  cursor: pointer; transition: background 0.2s; border-radius: 4px;
+}
+.status-row:last-child { border-bottom: none; }
+.status-row:hover { background: rgba(255,255,255,0.03); }
+.status-icon { flex-shrink: 0; width: 18px; text-align: center; font-size: 14px; }
+.status-icon.pass { color: var(--status-pass); }
+.status-icon.fail { color: var(--status-fail); }
+.status-icon.running { color: var(--status-running); }
+.status-icon.unknown { color: var(--status-unknown); }
+.status-label { color: var(--text-secondary); flex-shrink: 0; width: 40px; font-size: 12px; }
+.status-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-value .highlight { color: var(--blue); }
+/* ========== 错误详情展开 ========== */
+.error-detail {
+  display: none; margin: 4px 0 4px 68px;
+  background: rgba(248,81,73,0.08); border-left: 3px solid var(--red);
+  padding: 8px 12px; border-radius: 4px; font-size: 12px;
+  font-family: 'SFMono-Regular', 'Cascadia Code', monospace;
+  white-space: pre-wrap; word-break: break-all; color: var(--red);
+}
+.error-detail.show { display: block; }
+/* ========== 加载 / 空状态 ========== */
+.loading { text-align: center; padding: 80px 20px; color: var(--text-secondary); }
+.loading .spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { text-align: center; padding: 80px 20px; color: var(--text-secondary); }
+.empty h2 { font-size: 20px; margin-bottom: 8px; }
+/* ========== 响应式 ========== */
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; }
+  .header { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ===== 配置 =====
+const CONFIG = {
+  GITHUB_TOKEN: localStorage.getItem('GITHUB_TOKEN') || prompt('请输入 GitHub Personal Access Token（read-only: repo, actions）:', 'ghp_'),
+  GITHUB_OWNER: 'chmjk12-sketch',
+  ACR_REGISTRY: 'crpi-2hhvyuuzflfxsyey.cn-beijing.personal.cr.aliyuncs.com',
+  ACR_NAMESPACE: 'chmjk67',
+  AUTO_REFRESH_INTERVAL: 30000,
+  DOMAIN_SUFFIX: 'chmjk67.top',
+};
+
+// 保存到 localStorage（下次自动加载）
+if (CONFIG.GITHUB_TOKEN && CONFIG.GITHUB_TOKEN.startsWith('ghp_')) {
+  localStorage.setItem('GITHUB_TOKEN', CONFIG.GITHUB_TOKEN);
+}
+
+// ===== 状态常量 =====
+const STATUS = { PASS: 'pass', FAIL: 'fail', RUNNING: 'running', UNKNOWN: 'unknown' };
+const STATUS_ICONS = { pass: '✅', fail: '❌', running: '◌', unknown: '⚪' };
+
+// ===== DOM 工具 =====
+const $ = (s, p = document) => p.querySelector(s);
+const $$ = (s, p = document) => [...p.querySelectorAll(s)];
+
+let autoRefreshTimer = null;
+let lastRefreshTime = null;
+
+// ===== GitHub API 封装 =====
+async function ghFetch(path) {
+  const r = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${CONFIG.GITHUB_TOKEN}`,
+      Accept: 'application/vnd.github.v3+json',
+      'User-Agent': 'pipeline-dashboard',
+    },
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error(`GitHub API ${r.status}: ${body.slice(0, 200)}`);
+  }
+  const rate = r.headers.get('X-RateLimit-Remaining');
+  if (rate && parseInt(rate) < 10) console.warn(`GitHub API rate limit low: ${rate} remaining`);
+  return r.json();
+}
+
+// ===== ACR Registry API =====
+async function checkACRImage(repoName) {
+  try {
+    const r = await fetch(`https://${CONFIG.ACR_REGISTRY}/v2/${CONFIG.ACR_NAMESPACE}/${repoName}/tags/list`);
+    if (r.status === 401 || r.status === 404) return { status: STATUS.UNKNOWN, text: '未推送到 ACR', detail: `HTTP ${r.status}` };
+    const data = await r.json();
+    if (!data.tags || data.tags.length === 0) return { status: STATUS.UNKNOWN, text: '无镜像 tag' };
+    const hasLatest = data.tags.includes('latest');
+    return {
+      status: hasLatest ? STATUS.PASS : STATUS.UNKNOWN,
+      text: hasLatest ? `:latest 已推送 · ${data.tags.length} tags` : `存在 tag(s): ${data.tags.slice(0, 5).join(', ')}`,
+    };
+  } catch (e) {
+    return { status: STATUS.UNKNOWN, text: '查询失败', detail: e.message };
+  }
+}
+
+// ===== 域名可达性 =====
+async function checkDomain(appName) {
+  const domain = `${appName}.${CONFIG.DOMAIN_SUFFIX}`;
+  const url = `https://${domain}`;
+  try {
+    const start = performance.now();
+    const r = await fetch(url, { mode: 'no-cors', signal: AbortSignal.timeout(5000) });
+    const elapsed = Math.round(performance.now() - start);
+    return { status: STATUS.PASS, text: `${domain} ⚡ ${elapsed}ms`, detail: `HTTP ${r.status || 'opaque'}` };
+  } catch (e) {
+    return { status: STATUS.UNKNOWN, text: `${domain} 不可达`, detail: e.message };
+  }
+}
+
+// ===== ECS 容器状态 =====
+async function checkECS(appName) {
+  const url = `https://${appName}.${CONFIG.DOMAIN_SUFFIX}/status.json`;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return { status: STATUS.UNKNOWN, text: '无状态信息', detail: `HTTP ${r.status}` };
+    const data = await r.json();
+    return { status: STATUS.PASS, text: data.status === 'ok' ? '容器运行中' : data.status, detail: JSON.stringify(data) };
+  } catch (e) {
+    return { status: STATUS.UNKNOWN, text: '未部署 / 无状态', detail: e.message };
+  }
+}
+
+// ===== 查询单个项目状态 =====
+async function fetchProjectStatus(project) {
+  const { name, repo } = project;
+  const results = { name, repo, rows: {} };
+
+  // 1. 仓库状态
+  try {
+    const repoData = await ghFetch(`/repos/${CONFIG.GITHUB_OWNER}/${repo}`);
+    const commits = await ghFetch(`/repos/${CONFIG.GITHUB_OWNER}/${repo}/commits?per_page=1`);
+    const lastCommit = commits[0];
+    const timeAgo = lastCommit ? timeSince(new Date(lastCommit.commit.committer.date)) : '未知';
+    results.rows.repo = {
+      status: STATUS.PASS,
+      text: `最后提交: ${timeAgo} · ${repoData.default_branch} ${lastCommit ? lastCommit.sha.slice(0, 7) : ''}`,
+      detail: lastCommit ? lastCommit.commit.message : '',
+    };
+  } catch (e) {
+    results.rows.repo = { status: STATUS.FAIL, text: '仓库信息获取失败', detail: e.message };
+  }
+
+  // 2. Actions
+  try {
+    const runs = await ghFetch(`/repos/${CONFIG.GITHUB_OWNER}/${repo}/actions/runs?per_page=1&status=completed&branch=main`);
+    if (runs.workflow_runs && runs.workflow_runs.length > 0) {
+      const lastRun = runs.workflow_runs[0];
+      const status = lastRun.conclusion === 'success' ? STATUS.PASS : STATUS.FAIL;
+      const duration = lastRun.run_started_at ? timeSince(new Date(lastRun.run_started_at)) : '';
+      results.rows.actions = {
+        status,
+        text: `${lastRun.name} #${lastRun.run_number} · ${lastRun.conclusion} · ${duration}`,
+        detail: lastRun.html_url,
+      };
+    } else {
+      results.rows.actions = { status: STATUS.UNKNOWN, text: '暂无 workflow 记录', detail: '' };
+    }
+  } catch (e) {
+    results.rows.actions = { status: STATUS.UNKNOWN, text: 'Actions 查询失败', detail: e.message };
+  }
+
+  // 3. ACR 镜像
+  results.rows.acr = await checkACRImage(name);
+
+  // 4. 域名
+  results.rows.domain = await checkDomain(name);
+
+  // 5. ECS
+  results.rows.ecs = await checkECS(name);
+
+  return results;
+}
+
+// ===== 发现项目（扫描所有含 deploy.yml 的仓库）=====
+async function discoverProjects() {
+  try {
+    const searchResult = await ghFetch(`/search/code?q=.github/workflows/deploy.yml+user:${CONFIG.GITHUB_OWNER}&per_page=50`);
+    const items = searchResult.items || [];
+    const reposMap = {};
+    for (const item of items) {
+      if (item.repository && item.repository.name) {
+        const repoName = item.repository.name;
+        if (!reposMap[repoName]) {
+          reposMap[repoName] = { name: repoName, repo: repoName };
+        }
+      }
+    }
+    return Object.values(reposMap);
+  } catch (e) {
+    // 如果 code search 不可用，降级到 repo list
+    console.warn('code search failed, falling back to repo list:', e.message);
+    try {
+      const repos = await ghFetch(`/users/${CONFIG.GITHUB_OWNER}/repos?per_page=50&sort=updated`);
+      const filtered = [];
+      for (const repo of repos) {
+        try {
+          await ghFetch(`/repos/${CONFIG.GITHUB_OWNER}/${repo.name}/contents/.github/workflows/deploy.yml`);
+          filtered.push({ name: repo.name, repo: repo.name });
+        } catch { /* 没有 deploy.yml，跳过 */ }
+      }
+      return filtered;
+    } catch (e2) {
+      throw new Error(`项目发现失败: ${e2.message}`);
+    }
+  }
+}
+
+// ===== 全部刷新 =====
+async function refreshAll() {
+  const grid = $('#grid');
+  if (!grid) return;
+
+  grid.innerHTML = `<div class="loading"><div class="spinner"></div><div>正在刷新数据...</div></div>`;
+
+  let projects;
+  try {
+    projects = await discoverProjects();
+  } catch (e) {
+    showBanner(`⚠️ 项目发现失败: ${e.message}`);
+    grid.innerHTML = `<div class="empty"><h2>无法发现项目</h2><p>${e.message}</p></div>`;
+    return;
+  }
+
+  if (projects.length === 0) {
+    grid.innerHTML = `<div class="empty"><h2>未发现含 CI/CD 的项目</h2><p>仓库中未找到 .github/workflows/deploy.yml 文件</p></div>`;
+    updateStats([]);
+    return;
+  }
+
+  const results = await Promise.allSettled(projects.map(p => fetchProjectStatus(p)));
+  const projectStatuses = results.map((r, i) =>
+    r.status === 'fulfilled' ? r.value : { name: projects[i].name, repo: projects[i].repo, rows: {}, error: r.reason.message }
+  );
+
+  renderGrid(projectStatuses);
+  updateStats(projectStatuses);
+  updateRefreshTime();
+  hideBanner();
+}
+
+// ===== 渲染 =====
+function renderGrid(projectStatuses) {
+  const grid = $('#grid');
+  if (!grid) return;
+
+  // 按状态排序：fail > running > pass > unknown
+  const order = { fail: 0, running: 1, pass: 2, unknown: 3 };
+  projectStatuses.sort((a, b) => {
+    const aVals = Object.values(a.rows).map(r => order[r.status] ?? 3);
+    const bVals = Object.values(b.rows).map(r => order[b.status] ?? 3);
+    const aMin = aVals.length ? Math.min(...aVals) : 3;
+    const bMin = bVals.length ? Math.min(...bVals) : 3;
+    return aMin - bMin;
+  });
+
+  grid.innerHTML = projectStatuses.map(ps => {
+    const rows = [
+      { key: 'repo', label: '仓库', ...(ps.rows.repo || { status: STATUS.UNKNOWN, text: '无数据' }) },
+      { key: 'actions', label: '构建', ...(ps.rows.actions || { status: STATUS.UNKNOWN, text: '无数据' }) },
+      { key: 'acr', label: '镜像', ...(ps.rows.acr || { status: STATUS.UNKNOWN, text: '无数据' }) },
+      { key: 'domain', label: '域名', ...(ps.rows.domain || { status: STATUS.UNKNOWN, text: '无数据' }) },
+      { key: 'ecs', label: '容器', ...(ps.rows.ecs || { status: STATUS.UNKNOWN, text: '无数据' }) },
+    ];
+
+    return `<div class="card" data-repo="${ps.repo}">
+      <div class="card-title">
+        <a class="repo-link" href="https://github.com/${CONFIG.GITHUB_OWNER}/${ps.repo}" target="_blank">${ps.name}</a>
+        <span style="font-size:12px;color:var(--text-muted)">${CONFIG.GITHUB_OWNER}/${ps.repo}</span>
+      </div>
+      ${rows.map(r => `
+        <div class="status-row" data-key="${r.key}" data-status="${r.status}" data-detail="${(r.detail || '').replace(/"/g, '&quot;')}">
+          <span class="status-icon ${r.status}">${STATUS_ICONS[r.status]}</span>
+          <span class="status-label">${r.label}</span>
+          <span class="status-value">${r.text}</span>
+        </div>
+        <div class="error-detail" data-for="${r.key}">${(r.detail || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+      `).join('')}
+      ${ps.error ? `<div style="color:var(--red);font-size:12px;margin-top:8px;padding:4px 8px;background:rgba(248,81,73,0.08);border-radius:4px">${ps.error}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  // 绑定点击事件（展开错误详情）
+  $$('.status-row').forEach(el => {
+    el.addEventListener('click', () => {
+      const status = el.dataset.status;
+      if (status !== STATUS.FAIL && status !== STATUS.RUNNING) return;
+      const key = el.dataset.key;
+      const detail = el.parentElement.querySelector(`.error-detail[data-for="${key}"]`);
+      if (detail) detail.classList.toggle('show');
+    });
+  });
+}
+
+// ===== 更新统计 =====
+function updateStats(projectStatuses) {
+  let pass = 0, fail = 0, running = 0, unknown = 0;
+  for (const ps of projectStatuses) {
+    for (const row of Object.values(ps.rows)) {
+      if (row.status === STATUS.PASS) pass++;
+      else if (row.status === STATUS.FAIL) fail++;
+      else if (row.status === STATUS.RUNNING) running++;
+      else unknown++;
+    }
+  }
+  $('#stats-html').innerHTML = `
+    <span class="stat-item"><span class="stat-dot pass"></span>${pass} 通过</span>
+    <span class="stat-item"><span class="stat-dot fail"></span>${fail} 失败</span>
+    <span class="stat-item"><span class="stat-dot running"></span>${running} 运行中</span>
+    <span class="stat-item"><span class="stat-dot unknown"></span>${unknown} 无数据</span>
+    <span style="color:var(--text-muted);margin-left:4px">| ${projectStatuses.length} 个项目</span>
+  `;
+}
+
+// ===== 工具函数 =====
+function timeSince(date) {
+  const seconds = Math.floor((Date.now() - date) / 1000);
+  if (seconds < 60) return '刚刚';
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins} 分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  return `${days} 天前`;
+}
+
+function showBanner(msg) { const b = $('#banner'); if (b) { b.textContent = msg; b.classList.add('show'); } }
+function hideBanner() { const b = $('#banner'); if (b) b.classList.remove('show'); }
+function updateRefreshTime() {
+  lastRefreshTime = new Date();
+  const el = $('#refresh-time');
+  if (el) el.textContent = `⏱ ${lastRefreshTime.toLocaleTimeString()}`;
+}
+
+// ===== 初始化 =====
+function init() {
+  document.getElementById('app').innerHTML = `
+    <div class="header">
+      <h1><span class="logo">🚀</span> Pipeline Dashboard</h1>
+      <div class="stats-bar" id="stats-html"></div>
+      <div class="controls">
+        <span class="refresh-time" id="refresh-time"></span>
+        <label class="auto-refresh-label">
+          <input type="checkbox" id="auto-refresh" checked> 自动刷新
+        </label>
+        <button id="btn-refresh">🔄 刷新</button>
+      </div>
+    </div>
+    <div class="banner-error" id="banner"></div>
+    <div class="grid" id="grid">
+      <div class="loading"><div class="spinner"></div><div>正在加载项目数据...</div></div>
+    </div>
+  `;
+
+  // 绑定事件
+  $('#btn-refresh').addEventListener('click', () => {
+    refreshAll();
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    if ($('#auto-refresh').checked) {
+      autoRefreshTimer = setInterval(refreshAll, CONFIG.AUTO_REFRESH_INTERVAL);
+    }
+  });
+
+  $('#auto-refresh').addEventListener('change', function() {
+    if (this.checked) {
+      autoRefreshTimer = setInterval(refreshAll, CONFIG.AUTO_REFRESH_INTERVAL);
+    } else {
+      if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    }
+  });
+
+  // 首次加载
+  refreshAll();
+  if ($('#auto-refresh').checked) {
+    autoRefreshTimer = setInterval(refreshAll, CONFIG.AUTO_REFRESH_INTERVAL);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
